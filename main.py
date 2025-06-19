@@ -52,7 +52,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             answer_out = gr.Textbox(label="Final Answer", interactive=False)
     
     btn.click(
-        rag_pipeline,
+        advanced_pipeline,
         inputs=inp,
         outputs=[rewrite_out, context_out, summary_out, answer_out]
     )
