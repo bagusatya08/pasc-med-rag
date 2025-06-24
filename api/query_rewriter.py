@@ -12,10 +12,10 @@ load_dotenv()
 os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
 
 class QueryRewriter:
-    def __init__(self, model_name="gpt-4o", temperature=0, max_tokens=3000):
-        self.llm = ChatOpenAI(temperature=0, 
+    def __init__(self):
+        self.llm = ChatOpenAI(temperature=0.2, 
                     model_name="gpt-4o", 
-                    max_tokens=3000)
+                    max_tokens=10000)
 
         self.example_prompt_template = PromptTemplate(
             input_variables=["user_question", "rewritten_question"],
@@ -103,16 +103,6 @@ if __name__ == "__main__":
 
     rewriter = QueryRewriter()
     
-    if args.query:
-        result = rewriter.rewrite(args.query)
-        print("\nRewritten Question:")
-        print(result)
-    else:
-        print("Enter your medical query about Long-COVID (press Ctrl+D when done):")
-        user_input = sys.stdin.read().strip()
-        if user_input:
-            result = rewriter.rewrite(user_input)
-            print("\nRewritten Question:")
-            print(result)
-        else:
-            print("No input provided")
+    result = rewriter.rewrite(args.query)
+    print("\nRewritten Question:")
+    print(result)
