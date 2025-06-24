@@ -1,5 +1,5 @@
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 from api.query_rewriter import QueryRewriter
 from api.context_summarization import ContextSummarizer
@@ -11,7 +11,7 @@ import os
 
 load_dotenv()
 
-rewriter = QueryRewriter(model_name="gpt-4o", max_tokens=200)
+rewriter = QueryRewriter()
 context_summarizer = ContextSummarizer()
 answer_generator = AnswerGenerator()
 embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
@@ -19,7 +19,10 @@ vector_store = FAISS.load_local("med_article_vdb0406", embeddings, allow_dangero
 
 def naive_pipeline(query: str):
     docs = vector_store.similarity_search(query, k=3)
-    context = "\n\n".join([d.page_content for d in docs])
+    context = "\n\n".join([
+            f"<Chunk {i+1}>\n{doc.page_content}" 
+            for i, doc in enumerate(docs)
+            ])
 
     final_answer = answer_generator.generate(query, context)
 
@@ -29,8 +32,11 @@ def advanced_pipeline(query: str):
     try:
         rewritten_query = rewriter.rewrite(query)
         docs = vector_store.similarity_search(rewritten_query, k=3)
-        context = "\n\n".join([d.page_content for d in docs])
-        summarized_context = context_summarizer.summarize_context(context)
+        context = "\n\n".join([
+            f"<Chunk {i+1}>\n{doc.page_content}" 
+            for i, doc in enumerate(docs)
+            ])
+        summarized_context = context_summarizer.summarize(context)
         final_answer = answer_generator.generate(query, summarized_context)
         
         return rewritten_query, context, summarized_context, final_answer
@@ -38,14 +44,14 @@ def advanced_pipeline(query: str):
         error_msg = f"Error: {str(e)}"
         return error_msg, error_msg, error_msg, error_msg
 
-# Create RAG System as a Blocks interface
-with gr.Blocks(theme=gr.themes.Soft()) as rag_tab:
+inp = gr.Textbox(label="Input Query", placeholder="Enter your question...")
+
+with gr.Blocks(theme=gr.themes.Soft()) as advanced:
     with gr.Row():
         with gr.Column():
-            inp = gr.Textbox(label="Input Query", placeholder="Enter your question...")
+            inp.render()
             btn = gr.Button("Run Pipeline", variant="primary")
         
-        # with gr.Column():
             rewrite_out = gr.Textbox(label="Rewritten Query", interactive=False)
             context_out = gr.Textbox(label="Retrieved Context", lines=4, interactive=False)
             summary_out = gr.Textbox(label="Summarized Context", interactive=False)
@@ -57,25 +63,23 @@ with gr.Blocks(theme=gr.themes.Soft()) as rag_tab:
         outputs=[rewrite_out, context_out, summary_out, answer_out]
     )
 
-# Create other tabs
-hello_world = gr.Interface(lambda name: "Hello " + name, "text", "text")
-bye_world = gr.Interface(lambda name: "Bye " + name, "text", "text")
+with gr.Blocks(theme=gr.themes.Soft()) as naive:
+    with gr.Row():
+        with gr.Column():
+            context_out = gr.Textbox(label="Retrieved Context", lines=4, interactive=False)
+            answer_out = gr.Textbox(label="Final Answer", interactive=False)
+    
+    inp.change(
+        lambda: gr.Textbox("Processing..."), 
+    ).then(
+        naive_pipeline, 
+        inputs=inp, 
+        outputs=[context_out, answer_out]
+    )
 
-# Updated ChatInterface with new messages format
-def chat_response(message, history):
-    """Simple chat response function using new message format"""
-    return f"Hello {message}"
-
-chat = gr.ChatInterface(
-    chat_response,
-    examples=["What's your name?", "How does this work?"],
-    title="Simple Chat"
-)
-
-# Combine into Tabbed Interface
 demo = gr.TabbedInterface(
-    [rag_tab, hello_world, bye_world, chat],
-    ["Advanced RAG", "Hello World", "Bye World", "Chat"]
+    [advanced, naive],
+    ["Advanced RAG", "Naive RAG"]
 )
 
 if __name__ == "__main__":
