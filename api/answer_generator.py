@@ -55,18 +55,18 @@ class AnswerGenerator:
         Before generating your answer, follow this reasoning process:
         1. **Understand the Question**: Identify key medical entities and patient context
         2. **Context Analysis**: 
-           - What context chunks are relevant to the question?
-           - What specific evidence supports the answer?
-           - Are there conflicting information between chunks?
+            - What context chunks are relevant to the question?
+            - What specific evidence supports the answer?
+            - Are there conflicting information between chunks?
         3. **Knowledge Gap Check**:
-           - Is sufficient information available in the context?
-           - What critical information is missing?
+            - Is sufficient information available in the context?
+            - What critical information is missing?
         4. **Safety Consideration**:
-           - Are there any risk factors or red flags mentioned?
-           - Does the answer require professional consultation?
+            - Are there any risk factors or red flags mentioned?
+            - Does the answer require professional consultation?
         5. **Response Structuring**:
-           - How to present complex medical information simply?
-           - What analogies or comparisons would help understanding?
+            - How to present complex medical information simply?
+            - What analogies or comparisons would help understanding?
         </reasoning steps>
         
         <tasks>
@@ -126,9 +126,9 @@ class AnswerGenerator:
                 "reasoning": """
                 1. Key question elements: persistent fatigue (>months), post-COVID context
                 2. Context relevance:
-                   - Chunk 1: Confirms PCFS prevalence and duration (>6 months)
-                   - Chunk 2: Explains biological mechanisms (mitochondrial, inflammation, autonomic)
-                   - Chunk 3: Provides management strategies and prognosis
+                    - Chunk 1: Confirms PCFS prevalence and duration (>6 months)
+                    - Chunk 2: Explains biological mechanisms (mitochondrial, inflammation, autonomic)
+                    - Chunk 3: Provides management strategies and prognosis
                 3. No conflicts between chunks - all complementary
                 4. Missing: Patient's specific duration, severity, comorbidities
                 5. Safety: No red flags but recommend professional consultation
@@ -140,9 +140,9 @@ class AnswerGenerator:
                 • This is known as Post-COVID Fatigue Syndrome (PCFS), affecting 58-80% of Long-COVID patients
                 • The fatigue typically lasts more than 6 months after initial infection
                 • Possible causes include:
-                  - Energy production issues in cells
-                  - Ongoing inflammation
-                  - Nervous system regulation problems
+                    - Energy production issues in cells
+                    - Ongoing inflammation
+                    - Nervous system regulation problems
                 
                 Recommended management approaches:
                 ✓ Balance activity and rest (pacing)

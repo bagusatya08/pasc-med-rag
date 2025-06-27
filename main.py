@@ -46,18 +46,26 @@ def advanced_pipeline(query: str):
 
 inp = gr.Textbox(label="Input Query", placeholder="Enter your question...")
 
-with gr.Blocks(theme=gr.themes.Soft()) as advanced:
+with gr.Blocks(theme=gr.themes.Soft()) as user_input:
     with gr.Row():
         with gr.Column():
             inp.render()
             btn = gr.Button("Run Pipeline", variant="primary")
-        
+    
+    btn.click(
+        inputs=inp
+    )
+
+
+with gr.Blocks(theme=gr.themes.Soft()) as advanced:
+    with gr.Row():
+        with gr.Column():
             rewrite_out = gr.Textbox(label="Rewritten Query", interactive=False)
             context_out = gr.Textbox(label="Retrieved Context", lines=4, interactive=False)
             summary_out = gr.Textbox(label="Summarized Context", interactive=False)
             answer_out = gr.Textbox(label="Final Answer", interactive=False)
     
-    btn.click(
+    inp.change(
         advanced_pipeline,
         inputs=inp,
         outputs=[rewrite_out, context_out, summary_out, answer_out]
@@ -77,9 +85,19 @@ with gr.Blocks(theme=gr.themes.Soft()) as naive:
         outputs=[context_out, answer_out]
     )
 
+with gr.Blocks(theme=gr.themes.Soft()) as parametric:
+    with gr.Row():
+        with gr.Column():
+            answer_out = gr.Textbox(label="Final Answer", interactive=False)
+    inp.change(
+        naive_pipeline,
+        inputs=inp,
+        outputs=[context_out, answer_out]
+    )
+
 demo = gr.TabbedInterface(
-    [advanced, naive],
-    ["Advanced RAG", "Naive RAG"]
+    [user_input, advanced, naive, parametric],
+    ["Ask Your Question","Advanced RAG", "Naive RAG", "Frozen LLMs"]
 )
 
 if __name__ == "__main__":
