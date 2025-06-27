@@ -16,10 +16,10 @@ from google.cloud import storage
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GCS_PROJECT_ID = os.getenv("GCS_PROJECT_ID")
 GCS_PREFIX = os.getenv("GCS_PREFIX")
-VECTOR_STORE_FOLDER = "med_article_vdb0406"
+VECTOR_STORE_FOLDER = "med_article_vdb2706"
 
 DEFAULT_CHUNK_SIZE = 512
-DEFAULT_CHUNK_OVERLAP = 100 # look for this, then kecilkan jadi 50
+DEFAULT_CHUNK_OVERLAP = 51
 
 load_dotenv()
 GCP_CREDENTIAL_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
@@ -113,7 +113,8 @@ def process_single_pdf_worker(args_tuple):
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             length_function=len,
-            add_start_index=True
+            add_start_index=True,
+            is_separator_regex=True
         )
         texts_chunks = text_splitter.split_documents(documents)
         if not texts_chunks:

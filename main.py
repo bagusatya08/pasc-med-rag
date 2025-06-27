@@ -3,7 +3,7 @@ from langchain_openai import OpenAIEmbeddings
 
 from api.query_rewriter import QueryRewriter
 from api.context_summarization import ContextSummarizer
-from api.answer_generator import AnswerGenerator
+from api.answer_generator import AnswerGeneratorRAG, AnswerGeneratorFrozen
 
 import gradio as gr
 from dotenv import load_dotenv
@@ -13,9 +13,10 @@ load_dotenv()
 
 rewriter = QueryRewriter()
 context_summarizer = ContextSummarizer()
-answer_generator = AnswerGenerator()
+answer_generator_RAG = AnswerGeneratorRAG()
 embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 vector_store = FAISS.load_local("med_article_vdb0406", embeddings, allow_dangerous_deserialization=True)
+answer_generator_frozen = AnswerGeneratorFrozen()
 
 def naive_pipeline(query: str):
     docs = vector_store.similarity_search(query, k=3)
@@ -24,7 +25,7 @@ def naive_pipeline(query: str):
             for i, doc in enumerate(docs)
             ])
 
-    final_answer = answer_generator.generate(query, context)
+    final_answer = answer_generator_RAG.generate(query, context)
 
     return context, final_answer
 
@@ -37,7 +38,7 @@ def advanced_pipeline(query: str):
             for i, doc in enumerate(docs)
             ])
         summarized_context = context_summarizer.summarize(context)
-        final_answer = answer_generator.generate(query, summarized_context)
+        final_answer = answer_generator_RAG.generate(query, summarized_context)
         
         return rewritten_query, context, summarized_context, final_answer
     except Exception as e:
@@ -46,6 +47,10 @@ def advanced_pipeline(query: str):
 
 inp = gr.Textbox(label="Input Query", placeholder="Enter your question...")
 
+def frozen_pipeline(query: str):
+    final_answer = answer_generator_frozen.generate(query)
+    return final_answer
+    
 with gr.Blocks(theme=gr.themes.Soft()) as user_input:
     with gr.Row():
         with gr.Column():
@@ -55,7 +60,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as user_input:
     btn.click(
         inputs=inp
     )
-
 
 with gr.Blocks(theme=gr.themes.Soft()) as advanced:
     with gr.Row():
@@ -90,9 +94,9 @@ with gr.Blocks(theme=gr.themes.Soft()) as parametric:
         with gr.Column():
             answer_out = gr.Textbox(label="Final Answer", interactive=False)
     inp.change(
-        naive_pipeline,
+        frozen_pipeline,
         inputs=inp,
-        outputs=[context_out, answer_out]
+        outputs=answer_out
     )
 
 demo = gr.TabbedInterface(

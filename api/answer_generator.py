@@ -14,7 +14,7 @@ load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
 MODEL_NAME = "deepseek/deepseek-r1-0528-qwen3-8b"
 
-class AnswerGenerator:
+class AnswerGeneratorRAG:
     def __init__(self):
         self.llm = ChatOpenAI(
             model=MODEL_NAME,
@@ -219,6 +219,133 @@ class AnswerGenerator:
         if answer_match:
             return answer_match.group(1).strip()
         return full_response
+
+class AnswerGeneratorFrozen:
+    def __init__(self):
+        self.llm = ChatOpenAI(
+            model=MODEL_NAME,
+            openai_api_base="https://router.huggingface.co/novita/v3/openai",
+            openai_api_key=HF_TOKEN,
+            temperature=0.4,
+            max_tokens=30000
+        )
+        
+        self.example_prompt_template = PromptTemplate(
+            input_variables=["user_question", "reasoning", "answer"],
+            template="""
+            <input question>
+            {user_question}
+            </input question>
+            
+            <reasoning>
+            {reasoning}
+            </reasoning>
+            
+            <answer>
+            {answer}
+            </answer>
+            """
+        )
+        
+        prefix = """
+        <role>
+        You are a medical expert specialized in Long-COVID (PASC).
+        You need to act as a Doctor/Clinician communicating with a patient.
+        </role>
+
+        <reasoning steps>
+        Before generating your answer, follow this reasoning process:
+        1. **Understand the Question**: Identify key medical entities
+        2. **Safety Consideration**:
+            - Are there any risk factors or red flags mentioned?
+            - Does the answer require professional consultation?
+        3. **Response Structuring**:
+            - How to present complex medical information simply?
+            - What analogies or comparisons would help understanding?
+        </reasoning steps>
+        
+        <tasks>
+        1. **Safety and Ethics**:
+        • Never provide medical advice beyond general information
+        • Always recommend consulting a healthcare provider
+        • Acknowledge limitations of the information
+        </tasks>
+        
+        Here are some examples:
+        """
+        
+        suffix = """
+        Now generate an answer for this question:
+        <input question>
+        {user_question}
+        </input question>
+
+        <output format>
+        Follow this exact output format:
+        
+        <reasoning>
+        [Your step-by-step reasoning here]
+        </reasoning>
+        
+        <answer>
+        [Your final answer here]
+        </answer>
+        </output format>
+        """
+        
+        self.examples = [
+            {
+                "user_question": "Why am I so tired months after COVID?",
+                "reasoning": """
+                1. Key question elements: persistent fatigue (>months), post-COVID context
+                2. Safety: No red flags but recommend professional consultation
+                3. Structure: Explain causes simply, list management options, provide hope
+                """,
+                "answer": """
+                I understand you're experiencing persistent fatigue after COVID, which is very common. Based on current medical understanding:
+
+                • This is known as Post-COVID Fatigue Syndrome (PCFS), affecting 58-80% of Long-COVID patients
+                • The fatigue typically lasts more than 6 months after initial infection
+                • Possible causes include:
+                    - Energy production issues in cells
+                    - Ongoing inflammation
+                    - Nervous system regulation problems
+                
+                Recommended management approaches:
+                ✓ Balance activity and rest (pacing)
+                ✓ Improve sleep habits
+                ✓ Gradual exercise program (with professional guidance)
+                ✓ Cognitive therapy for fatigue management
+                
+                Most patients see improvement within 6-12 months with proper management. I recommend discussing these options with your healthcare provider to develop a personalized plan.
+                """
+            }
+        ]
+
+        self.generator_prompt = FewShotPromptTemplate(
+                examples=self.examples,
+                example_prompt=self.example_prompt_template,
+                prefix=prefix,
+                suffix=suffix,
+                input_variables=["user_question"],
+                example_separator="\n\n"
+            )
+        
+        self.chain = (
+            RunnablePassthrough()
+            | self.generator_prompt
+            | self.llm
+        )
+
+    def generate(self, user_question: str) -> str:
+        full_response = self.chain.invoke({
+            "user_question": user_question
+        }).content.strip()
+        
+        answer_match = re.search(r"<answer>(.*?)</answer>", full_response, re.DOTALL)
+        if answer_match:
+            return answer_match.group(1).strip()
+        return full_response
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate answers for Long-COVID questions')
@@ -228,7 +355,7 @@ if __name__ == "__main__":
     
     full_context = "\n\n".join(args.context)
     
-    generator = AnswerGenerator()
+    generator = AnswerGeneratorRAG()
     result = generator.generate(args.question, full_context)
     print("\nGenerated Answer:")
     print(result)
