@@ -20,7 +20,7 @@ class AnswerGeneratorRAG:
             model=MODEL_NAME,
             openai_api_base="https://router.huggingface.co/novita/v3/openai",
             openai_api_key=HF_TOKEN,
-            temperature=0.4,
+            temperature=0.1,
             max_tokens=30000
         )
         
@@ -46,47 +46,28 @@ class AnswerGeneratorRAG:
         )
         
         prefix = """
-        <role>
-        You are a medical expert specialized in Long-COVID (PASC). Provide accurate, evidence-based answers using ONLY the provided context.
-        You need to act as a Doctor/Clinician communicating with a patient.
-        </role>
+        <role>  
+        You are a medical expert in Long COVID (PASC), speaking as a supportive doctor to a diagnosed patient. 
+        Use only the provided context to give accurate, evidence-based answers.  
+        </role>  
 
-        <reasoning steps>
-        Before generating your answer, follow this reasoning process:
-        1. **Understand the Question**: Identify key medical entities and patient context
-        2. **Context Analysis**: 
-            - What context chunks are relevant to the question?
-            - What specific evidence supports the answer?
-            - Are there conflicting information between chunks?
-        3. **Knowledge Gap Check**:
-            - Is sufficient information available in the context?
-            - What critical information is missing?
-        4. **Safety Consideration**:
-            - Are there any risk factors or red flags mentioned?
-            - Does the answer require professional consultation?
-        5. **Response Structuring**:
-            - How to present complex medical information simply?
-            - What analogies or comparisons would help understanding?
-        </reasoning steps>
-        
-        <tasks>
-        1. **Generate the answer** based on these guidelines:  
-        • Use ONLY information from the provided context
-        • If answer isn't in context, say "I don't have enough information"
-        • Use plain language suitable for patients
-        • Be empathetic and supportive
-        • Structure response clearly with bullet points where helpful
-        • Include important medical details but explain them simply
+        <reasoning>  
+        Before answering:  
+        1. **Understand the question** – What is the patient asking?  
+        2. **Analyze context** – Which chunks are relevant? What evidence supports the answer? Any contradictions?  
+        3. **Plan response** – How can this be explained simply and clearly to a patient?  
+        </reasoning>  
 
-        2. **Safety and Ethics**:
-        • Never provide medical advice beyond general information
-        • Always recommend consulting a healthcare provider
-        • Acknowledge limitations of the information
-        </tasks>
-        
-        Here are some examples:
+        <instructions>  
+        When answering:  
+        1. Use only the context; if missing, say: “I don’t have enough information.”  
+        2. Use plain, patient-friendly language.  
+        3. Be warm and empathetic.  
+        4. Structure your response in two parts:  
+        - **Part 1: Empathetic acknowledgment** (validate the question)  
+        - **Part 2: Clear explanation** (simple, medically accurate answer)  
+        </instructions>
         """
-        
         suffix = """
         Now generate an answer for this question using the provided context:
         <input question>
@@ -96,100 +77,160 @@ class AnswerGeneratorRAG:
         <context>
         {context}
         </context>
-
-        <output format>
-        Follow this exact output format:
-        
-        <reasoning>
-        [Your step-by-step reasoning here]
-        </reasoning>
-        
-        <answer>
-        [Your final answer here]
-        </answer>
-        </output format>
         """
         
         self.examples = [
             {
-                "user_question": "Why am I so tired months after COVID?",
+                "user_question": "Can someone vaccinated get PASC infection?",
                 "context": """
                 <Chunk 1>
-                Post-COVID fatigue syndrome (PCFS) affects 58-80% of Long-COVID patients. It's characterized by persistent exhaustion lasting >6 months after acute infection. Key features include post-exertional malaise (PEM) and non-restorative sleep.
+                the belief that
+                vaccination was
+                contraindicated
+                because of PASC
+                (15. 6%). Schulthei ß
+                et al., 2021
+                Germany Cross-sectional DigiHero cohort
+                (recruited via
+                direct mailing to
+                citizens of Halle, Germany)
+                n = 294
+                Age range: > 14
+                Median (IQR)
+                age*: 51. 2
+                (15 – 83)
+                Median (IQR)
+                • n = 137 (46. 6%)
+                received 1 dose of a
+                SARS-CoV-2 vaccine
+                (mRNA or adenoviral
+                • vector, or
+                combination of both)
+                • PASC defined as
+                symptoms persisting
+                more than 4 weeks from
+                COVID-19 positive test
                 
                 <Chunk 2>
-                Underlying mechanisms may include mitochondrial dysfunction, persistent inflammation, and autonomic nervous system dysregulation. A 2023 NIH study found abnormal energy metabolism in 72% of Long-COVID fatigue patients.
+                persisted more than 12
+                weeks
+                ongoing symptoms, whereas 24 (38. 7%)
+                unvaccinated
+                individuals reported
+                ongoing symptoms. Furthermore, the
+                percentage of post-
+                infection vaccinations
+                was identical in
+                patients with PASC
+                that experienced
+                resolution of their
+                symptoms and in those
+                that reported ongoing
+                PASC. From the 175
+                individuals with
+                reported PASC, 104
+                individuals still had
+                ongoing symptoms at
+                the time of analysis, while 71 had resolved
+                PASC. Out of the 104
+                individuals with
                 
                 <Chunk 3>
-                Management strategies: 1) Activity pacing 2) Sleep hygiene 3) Graded exercise therapy (GET) under supervision 4) Cognitive behavioral therapy for fatigue (CBT-F). Most patients show improvement within 6-12 months with proper management.
+                PASC. Out of the 104
+                individuals with
+                ongoing symptoms, 80
+                (76. 9%) were
+                vaccinated post-
+                infection, whereas out
+                of the 71 individuals
+                with resolved PASC, 54
+                (76. 1%) were
+                vaccinated post-
+                infection. Simon et al., 2021 **
+                United
+                States
+                Retrospective
+                Cohort
+                Arcadia Data
+                Research
+                n = 240 648
+                Age range: N/A
+                Mean (SD) age: N/A
+                Sex (%F/%M): 59. 9/40. 1
+                • n = 17 796 (7. 4%)
+                individuals were
+                vaccinated with one
+                SARS-CoV-2 vaccine
+                dose within the first
+                twelve weeks after
                 """,
                 "reasoning": """
-                1. Key question elements: persistent fatigue (>months), post-COVID context
+                1. Understand the question: The user is asking if people who are vaccinated against COVID-19 can still develop PASC.
                 2. Context relevance:
-                    - Chunk 1: Confirms PCFS prevalence and duration (>6 months)
-                    - Chunk 2: Explains biological mechanisms (mitochondrial, inflammation, autonomic)
-                    - Chunk 3: Provides management strategies and prognosis
-                3. No conflicts between chunks - all complementary
-                4. Missing: Patient's specific duration, severity, comorbidities
-                5. Safety: No red flags but recommend professional consultation
-                6. Structure: Explain causes simply, list management options, provide hope
+                    - Chunk 1: Confirms that vaccinated individuals were part of the study population and that PASC was still observed in this group.
+                    - Chunk 2: Indicates that vaccination did not prevent ongoing PASC symptoms, as both vaccinated and unvaccinated individuals reported them at similar rates.
+                    - Chunk 3: Shows that a high proportion of people with ongoing PASC symptoms had received post-infection vaccination (76.9%), similar to those who recovered (76.1%), suggesting that vaccination did not completely prevent or resolve PASC.
+                3. Response structuring:
+                    - Start with an empathetic acknowledgment that it's a valid and common concern.
+                    - Explain clearly that while vaccination is beneficial, it does not fully prevent PASC in all cases.
                 """,
                 "answer": """
-                I understand you're experiencing persistent fatigue after COVID, which is very common. Based on current medical understanding:
-
-                • This is known as Post-COVID Fatigue Syndrome (PCFS), affecting 58-80% of Long-COVID patients
-                • The fatigue typically lasts more than 6 months after initial infection
-                • Possible causes include:
-                    - Energy production issues in cells
-                    - Ongoing inflammation
-                    - Nervous system regulation problems
+                That’s a great question, and it’s completely understandable to wonder about the role of vaccination when it comes to Long COVID. 
+                It’s important to know that you're not alone in asking this—many people are trying to make sense of how vaccines impact recovery and risk.
                 
-                Recommended management approaches:
-                ✓ Balance activity and rest (pacing)
-                ✓ Improve sleep habits
-                ✓ Gradual exercise program (with professional guidance)
-                ✓ Cognitive therapy for fatigue management
-                
-                Most patients see improvement within 6-12 months with proper management. I recommend discussing these options with your healthcare provider to develop a personalized plan.
+                While getting vaccinated is one of the best ways to reduce your risk of severe COVID-19, it does not fully eliminate the chance of developing PASC (Post-Acute Sequelae of COVID-19). 
+                According to the data, some individuals who were vaccinated still went on to experience lingering symptoms like fatigue or brain fog. 
+                In fact, studies show that similar percentages of vaccinated individuals reported ongoing PASC symptoms as those who did not. 
+                So yes, even if you're vaccinated, it is still possible—though perhaps less likely—to develop PASC.
                 """
             },
             {
-                "user_question": "What can I do about brain fog after COVID?",
+                "user_question": "What is the distinct difference in normal COVID-19 infection and PASC infection?",
                 "context": """
                 <Chunk 1>
-                Cognitive impairment ("brain fog") affects 32-56% of Long-COVID patients. Symptoms include memory problems, difficulty concentrating, and slowed processing speed. These often persist for 6+ months.
+                sistent fatigue with bodily pain or psychological prob -
+                lems, neurocognitive problems, or ongoing respiratory
+                issues. Prevalence rates of PASC vary between different
+                studies and subgroups, with the highest rates among
+                women and those who required hospitalization for the
+                initial SARS-CoV-2 infection [3–5]. Worldwide, physi -
+                cians face considerable difficulties in treating PASC due
+                to the absence of specific biological markers for clear
+                diagnostic classification and the lack of causal thera -
                 
                 <Chunk 2>
-                2024 clinical trial (n=214) showed computerized cognitive training improved processing speed by 32% and working memory by 28% after 12 weeks. Mindfulness-based interventions also showed benefit.
+                pulmonary recovery. Since PASC are found in as many as 10% of COVID- 19 patients (Sahanic et al., 2021; Venkatesan, 2021; Sudre et al., 2021b)⁠, robust, resource- saving tools assessing the individual risk of pulmo-
+                nary complications are urgently needed (Shah et al., 2021; Raghu and Wilson, 2020)⁠. Covariates
+                and characteristics of severe acute COVID- 19 such as male sex, age, and preexisting comorbidities,
                 
                 <Chunk 3>
-                Pharmacological options are limited. Some evidence for off-label use of stimulants (methylphenidate) in severe cases, but more research needed. Always consult neurologist before medication.
+                highly likely that this pathophysiology also occurs in patients with
+                post- COVID- 19 syndrome; indeed, preliminary data from our first
+                108 patients with post- COVID- 19 syndrome does demonstrate
+                an increased incidence of elevation of IL- 6. 24 More recently, data
+                have emerged demonstrating decreases in CD8+ T cells in patients
+                with PASC compared with healthy controls and patients who had
+                COVID- 19 but did not develop PASC. 25 26 Patients with PASC have
+                Patient’s perspective Continued
                 """,
                 "reasoning": """
-                1. Key question: Brain fog management strategies
+                1. Understand the question: Differences of COVID-19 and Long COVID-19
                 2. Context analysis:
-                   - Chunk 1: Establishes prevalence and symptom profile
-                   - Chunk 2: Shows efficacy of cognitive training (32% improvement) and mindfulness
-                   - Chunk 3: Notes medication limitations and need for specialist consultation
-                3. Missing: Patient's specific symptoms duration and severity
-                4. Safety: Medications require specialist supervision
-                5. Structure: Present non-drug options first, mention medications as last resort
+                   - Chunk 1: Highlights prevalence variation of PASC and diagnostic challenges due to lack of biomarkers
+                   - Chunk 2: Emphasizes need for risk assessment tools and identifies risk factors (sex, age, comorbidities)
+                   - Chunk 3: Presents biological evidence (elevated IL-6, reduced CD8+ T cells) linked to PASC pathophysiology
+                4. Response structuring:
+                    - Start with an empathetic acknowledgment that it's a valid and common concern.
+                    - Use simple comparison: active infection vs. long-term aftermath.
                 """,
                 "answer": """
-                Brain fog is a common and challenging aspect of Long-COVID. Based on current evidence:
+                That’s an excellent and very important question. 
+                Understanding the difference helps make sense of what you’re experiencing and how we can support your recovery.
 
-                • It affects 32-56% of patients and often lasts 6+ months
-                • Effective non-medical approaches include:
-                  - Computerized brain training (shown to improve thinking speed by 32%)
-                  - Mindfulness and meditation techniques
-                  - Cognitive rehabilitation therapy
-                
-                Medication options are currently limited and should only be considered:
-                - For severe cases
-                - Under neurological supervision
-                - When non-drug approaches haven't helped
-
-                I recommend starting with brain training exercises and mindfulness techniques. If symptoms significantly impact your daily life, consider asking your doctor for a referral to a neurologist or cognitive specialist.
+                Simply put, a normal COVID-19 infection is the early, active phase—when the virus is in your body, causing symptoms like fever or cough, and you are contagious. 
+                This usually resolves within a few weeks. PASC, or Long COVID, happens after that. It’s not a new infection, and you’re no longer contagious. 
+                But symptoms like fatigue, “brain fog,” or breathing issues may linger for weeks or months. 
+                It reflects ongoing effects of the virus on your body, especially the immune and nervous systems.
                 """
             }
         ]
@@ -249,29 +290,24 @@ class AnswerGeneratorFrozen:
         
         prefix = """
         <role>
-        You are a medical expert specialized in Long-COVID (PASC).
-        You need to act as a Doctor/Clinician communicating with a patient.
+        You are a medical expert in Long COVID (PASC), speaking as a supportive doctor to a diagnosed patient. 
+        Use only the provided context to give accurate, evidence-based answers.
         </role>
 
-        <reasoning steps>
-        Before generating your answer, follow this reasoning process:
-        1. **Understand the Question**: Identify key medical entities
-        2. **Safety Consideration**:
-            - Are there any risk factors or red flags mentioned?
-            - Does the answer require professional consultation?
-        3. **Response Structuring**:
-            - How to present complex medical information simply?
-            - What analogies or comparisons would help understanding?
-        </reasoning steps>
-        
-        <tasks>
-        1. **Safety and Ethics**:
-        • Never provide medical advice beyond general information
-        • Always recommend consulting a healthcare provider
-        • Acknowledge limitations of the information
-        </tasks>
-        
-        Here are some examples:
+        <reasoning>  
+        Before answering:  
+        1. **Understand the question** – What is the patient asking? 
+        2. **Plan response** – How can this be explained simply and clearly to a patient?  
+        </reasoning>  
+
+        <instructions>  
+        When answering:
+        1. Use plain, patient-friendly language.  
+        2. Be warm and empathetic.  
+        3. Structure your response in two parts:  
+        - **Part 1: Empathetic acknowledgment** (validate the question)  
+        - **Part 2: Clear explanation** (simple, medically accurate answer)  
+        </instructions>
         """
         
         suffix = """
@@ -279,46 +315,43 @@ class AnswerGeneratorFrozen:
         <input question>
         {user_question}
         </input question>
-
-        <output format>
-        Follow this exact output format:
-        
-        <reasoning>
-        [Your step-by-step reasoning here]
-        </reasoning>
-        
-        <answer>
-        [Your final answer here]
-        </answer>
-        </output format>
         """
         
         self.examples = [
             {
-                "user_question": "Why am I so tired months after COVID?",
+                "user_question": "Can someone vaccinated get PASC infection?",
                 "reasoning": """
-                1. Key question elements: persistent fatigue (>months), post-COVID context
-                2. Safety: No red flags but recommend professional consultation
-                3. Structure: Explain causes simply, list management options, provide hope
+                1. Understand the question: The user is asking if people who are vaccinated against COVID-19 can still develop PASC.
+                2. Response structuring:
+                    - Answer with "yes" or "no" answer followed with brief explanation
+                    - Explain clearly that while vaccination is beneficial, it does not fully prevent PASC in all cases.
                 """,
                 "answer": """
-                I understand you're experiencing persistent fatigue after COVID, which is very common. Based on current medical understanding:
+                Yes, it is possible, though less likely, for vaccinated individuals to develop PASC.
 
-                • This is known as Post-COVID Fatigue Syndrome (PCFS), affecting 58-80% of Long-COVID patients
-                • The fatigue typically lasts more than 6 months after initial infection
-                • Possible causes include:
-                    - Energy production issues in cells
-                    - Ongoing inflammation
-                    - Nervous system regulation problems
-                
-                Recommended management approaches:
-                ✓ Balance activity and rest (pacing)
-                ✓ Improve sleep habits
-                ✓ Gradual exercise program (with professional guidance)
-                ✓ Cognitive therapy for fatigue management
-                
-                Most patients see improvement within 6-12 months with proper management. I recommend discussing these options with your healthcare provider to develop a personalized plan.
+                While COVID-19 vaccines are highly effective at preventing severe illness, hospitalization, and death from the virus, they do not offer 100% protection against infection itself. 
+                If a vaccinated person experiences a "breakthrough infection"—meaning they still get infected with COVID-19 despite being vaccinated—there is still a chance, albeit a reduced one, that they could develop PASC afterward. 
+                The good news is that studies consistently show that vaccination significantly lowers your risk of developing PASC compared to unvaccinated individuals who get COVID-19. So, while It is not a complete guarantee against PASC, vaccination remains one of the best tools we have to protect against both severe acute COVID-19 and its long-term complications.
                 """
+            },
+            {
+                "user_question": "What is the distinct difference in normal COVID-19 infection and PASC infection?",
+                "reasoning": """
+                1. Understanding the question: Differences of COVID-19 and Long COVID
+                2. Response structuring:
+                    - Start with an empathetic acknowledgment that it's a valid and common concern.
+                    - Explain that the differences located in the type of conditions of COVID-19 and Long COVID
+                """,
+                "answer": """
+                It is an excellent and very important question to distinguish between a normal COVID-19 infection and PASC. 
+                Understanding this difference is crucial for us to manage your health concerns effectively.
+
+                Simply put, a normal COVID-19 infection refers to the acute illness when the SARS-CoV-2 virus is actively in your body, causing symptoms like fever, cough, or loss of smell, and you are contagious. 
+                This phase typically lasts a few weeks. PASC (Post-Acute Sequelae of SARS-CoV-2 infection), or Long COVID, is what happens after that initial active infection has largely resolved. 
+                It is not a new infection, and you are no longer contagious. Instead, PASC involves persistent or new health problems—such as profound fatigue, "brain fog," or shortness of breath—that linger for weeks or months following your acute COVID-19 illness. 
+                So, while the initial infection is the direct viral attack, PASC represents the ongoing, complex aftermath.
+                """
+
             }
         ]
 

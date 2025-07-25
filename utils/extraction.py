@@ -15,111 +15,118 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
 import pandas as pd
+import pypdf # Added for PDF metadata editing
 
 from google.cloud import storage
 from dotenv import load_dotenv
 
-def setup_chrome_options():
-    """Configures and returns Chrome options for headless Browse."""
+# --- download_pmc_pdf function remains the same ---
+def download_pmc_pdf(pdf_url, article_page_url, output_directory, desired_filename):
+    """
+    Downloads a PDF from PMC.
+    Saves it to the specified output_directory with desired_filename.
+    Returns the full path to the saved file if successful, None otherwise.
+    """
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    return chrome_options
+    # This experimental option helps in some environments to prevent crashes
+    chrome_options.add_experimental_option("prefs", {
+        "download.default_directory": output_directory,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade": True,
+        "plugins.always_open_pdf_externally": True
+    })
 
-def initialize_driver(chrome_options):
-    """Initializes and returns a Chrome WebDriver instance."""
-    service = ChromeService(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    return driver
-
-def navigate_to_page(driver, url):
-    """Navigates the WebDriver to the specified URL."""
-    print(f"\n[INFO] NAVIGATING TO: {url}")
-    driver.get(url)
-
-def find_and_get_pdf_url(driver, pdf_url_fragment):
-    """
-    Finds the PDF link on the page and returns its full, absolute URL.
-    Waits up to 10 seconds for the link to be clickable.
-    """
-    pdf_filename_from_url = pdf_url_fragment.split('/')[-1]
-    correct_relative_href = f"pdf/{pdf_filename_from_url}"
-    pdf_link_xpath = f"//a[@href='{correct_relative_href}' and @data-ga-label='pdf_download_desktop']"
-
-    wait = WebDriverWait(driver, 10)
-    pdf_link_element = wait.until(
-        EC.element_to_be_clickable((By.XPATH, pdf_link_xpath))
-    )
-    
-    relative_url = pdf_link_element.get_attribute('href')
-    # Resolve the relative URL to an absolute one
-    base_url = driver.current_url
-    absolute_url = urljoin(base_url, relative_url)
-    print(f"[INFO] Found PDF download link: {absolute_url}")
-    return absolute_url
-
-def download_file_content(download_url):
-    """Downloads file content from a URL using requests."""
-    print(f"[INFO] Starting download from: {download_url}")
-    response = requests.get(download_url, stream=True)
-    response.raise_for_status()  # Will raise an HTTPError for bad responses
-    return response
-
-def save_content_to_file(response, save_path):
-    """Saves the response content to a local file."""
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    with open(save_path, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-    print(f"[INFO] Successfully downloaded PDF to: {save_path}")
-    return save_path
-
-def download_pdf(pdf_url, article_page_url, output_directory, desired_filename):
-    """
-    Main pipeline function to download a PDF from PMC.
-    It sets up a browser, navigates to the page, finds the link, downloads, and saves the file.
-    
-    Args:
-        pdf_url (str): A URL fragment used to identify the correct download link.
-        article_page_url (str): The URL of the article page to navigate to.
-        output_directory (str): The directory to save the downloaded PDF in.
-        desired_filename (str): The name for the saved PDF file.
-
-    Returns:
-        str: The full path to the saved file if successful, None otherwise.
-    """
     driver = None
     save_path = os.path.join(output_directory, desired_filename)
 
     try:
-        # Action 1: Configure browser
-        options = setup_chrome_options()
-        
-        # Action 2: Initialize WebDriver
-        driver = initialize_driver(options)
-        
-        # Action 3: Navigate to the article page
-        navigate_to_page(driver, article_page_url)
-        
-        # Action 4: Find the actual PDF download URL from the page
-        actual_download_url = find_and_get_pdf_url(driver, pdf_url)
-        
-        # Action 5: Download the file content using requests
-        response = download_file_content(actual_download_url)
-        
-        # Action 6: Save the downloaded content to the specified file
-        final_path = save_content_to_file(response, save_path)
-        
-        return final_path
+        service = ChromeService(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
 
-    except (requests.exceptions.HTTPError, TimeoutException) as e:
-        print(f"[ERROR] Failed to download during web interaction or request: {e}")
-        if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
-            print(f"  Status Code: {e.response.status_code}")
-            print(f"  Response content (first 300 bytes): {e.response.content[:300]}")
+        print(f"\n[INFO] NAVIGATING TO: {article_page_url}")
+        driver.get(article_page_url)
+
+        pdf_filename_from_url = pdf_url.split('/')[-1]
+        correct_relative_href = f"pdf/{pdf_filename_from_url}"
+        pdf_link_xpath = f"//a[@href='{correct_relative_href}' and @data-ga-label='pdf_download_desktop']"
+
+        pdf_article_link_element = None
+
+        try:
+            # Wait for the primary PDF link
+            pdf_article_link_element = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, pdf_link_xpath))
+            )
+        except TimeoutException:
+            # If the primary link isn't found, try a fallback
+            print(f"[ERROR] Timeout finding clickable PDF link on article page with primary XPath: {pdf_link_xpath}.")
+            print(f"[INFO] Trying fallback XPath: //a[@href='{correct_relative_href}']")
+            try:
+                pdf_link_xpath_fallback = f"//a[@href='{correct_relative_href}']"
+                pdf_article_link_element = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, pdf_link_xpath_fallback))
+                )
+                print(f"[INFO] PDF link on article page found with fallback XPath!")
+            except TimeoutException:
+                print(f"[ERROR] Timeout finding clickable PDF link with fallback XPath either.")
+                return None
+
+        try:
+            # Click the link to ensure any necessary cookies or session state are set
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'auto', block: 'center', inline: 'center'});",
+                                  pdf_article_link_element)
+            time.sleep(0.5)
+            actions = ActionChains(driver)
+            actions.move_to_element(pdf_article_link_element).click().perform()
+            print(f"[INFO] Clicked PDF link on article page.")
+
+        except Exception as click_err:
+            print(f"[ERROR] An error occurred while clicking PDF link on article page: {click_err}")
+            return None
+
+        # Give a moment for any redirects or new tabs to process before grabbing cookies
+        time.sleep(2)
+        
+        selenium_cookies = driver.get_cookies()
+        request_cookies_dict = {cookie['name']: cookie['value'] for cookie in selenium_cookies}
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': driver.current_url # Use the final URL from the browser as the referer
+        }
+
+        print(f"[INFO] DOWNLOADING FROM: {pdf_url} to {save_path}")
+        response = requests.get(pdf_url, headers=headers, cookies=request_cookies_dict, stream=True)
+        response.raise_for_status()
+
+        content_type = response.headers.get('content-type', '').lower()
+        if 'application/pdf' not in content_type:
+            print(f"  [WARN] Content-Type is '{content_type}', not 'application/pdf'. Expected PDF at {pdf_url}")
+            # Even if content-type is not PDF, we can check the file signature
+            content_start = response.content[:4]
+            if content_start != b'%PDF':
+                 print(f"  [ERROR] File from {pdf_url} does not appear to be a PDF. Skipping.")
+                 return None
+            print("  [INFO] File signature is PDF, proceeding with download.")
+
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        with open(save_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"[INFO] Successfully downloaded PDF to: {save_path}")
+        return save_path
+
+    except requests.exceptions.HTTPError as http_err:
+        print(f"[ERROR] HTTP error during requests download: {http_err}")
+        if hasattr(http_err, 'response') and http_err.response is not None:
+            print(f"  Status Code: {http_err.response.status_code}")
+            print(f"  Response content (first 300 bytes): {http_err.response.content[:300]}")
         return None
     except WebDriverException as e:
         print(f"[ERROR] A WebDriverException occurred: {e}")
@@ -127,161 +134,159 @@ def download_pdf(pdf_url, article_page_url, output_directory, desired_filename):
             print(f"  Current URL at WebDriverException: {driver.current_url}")
         return None
     except Exception as e:
-        print(f"[ERROR] An unexpected error occurred in the download pipeline: {e}")
+        print(f"[ERROR] An unexpected error occurred in download_pmc_pdf: {e}")
         return None
     finally:
-        # Final Action: Clean up and close the browser
         if driver:
             driver.quit()
 
-def sanitize_filename(filename):
-    """
-    Removes characters that are invalid for most file systems and GCS object names.
-    If the input is None or not a string, it returns a default name.
-    """
-    if not isinstance(filename, str) or not filename.strip():
-        return "untitled_article"
-    # Remove invalid characters
-    s = re.sub(r'[\\/*?:"<>|]', "", filename)
-    # Replace whitespace with underscores and limit length
-    s = re.sub(r'\s+', '_', s)
-    return s[:150] # Limit filename length for safety
+# --- sanitize_filename function remains the same ---
+def sanitize_filename(name_str: str | None) -> str:
+    """Sanitizes a string to be a valid filename."""
+    if not name_str or pd.isna(name_str):
+        name_str = f"untitled_article_{time.strftime('%Y%m%d%H%M%S')}"
+    # Replace invalid characters with an underscore
+    name_str = re.sub(r'[^\w\-_. ]', '_', name_str)
+    # Replace one or more spaces with a single underscore
+    name_str = re.sub(r'\s+', '_', name_str)
+    # Limit filename length
+    return name_str[:150]
 
-def load_configuration():
+# --- NEW function to edit PDF metadata ---
+def edit_pdf_metadata(input_path, output_path, metadata):
     """
-    Loads environment variables and sets up GCS configuration.
-    
+    Adds custom metadata to a PDF file using the pypdf library.
+
+    Args:
+        input_path (str): Path to the original PDF.
+        output_path (str): Path to save the modified PDF.
+        metadata (dict): A dictionary of metadata to add.
+                         Keys should be PDF metadata keys (e.g., '/Title').
+
     Returns:
-        tuple: A tuple containing (GCS_BUCKET_NAME, GCS_FOLDER_PREFIX).
+        str: The path to the new PDF with metadata, or None on failure.
     """
+    try:
+        print(f"[INFO] Reading PDF for metadata editing: {os.path.basename(input_path)}")
+        reader = pypdf.PdfReader(input_path)
+        writer = pypdf.PdfWriter()
+
+        # Copy all pages from the original PDF to the writer object
+        writer.clone_document_from_reader(reader)
+        
+        # Add or update metadata fields
+        print(f"[INFO] Adding/updating metadata: {metadata}")
+        writer.add_metadata(metadata)
+
+        # Write the new PDF with updated metadata to the output file
+        with open(output_path, "wb") as f_out:
+            writer.write(f_out)
+
+        print(f"[SUCCESS] Metadata successfully written to: {os.path.basename(output_path)}")
+        return output_path
+    except Exception as e:
+        print(f"[ERROR] Failed to edit PDF metadata for {os.path.basename(input_path)}: {e}")
+        return None
+
+if __name__ == "__main__":
     load_dotenv()
     GCP_CREDENTIAL_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if GCP_CREDENTIAL_JSON:
+    if GCP_CREDENTIAL_JSON and os.path.exists(GCP_CREDENTIAL_JSON):
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GCP_CREDENTIAL_JSON
         print(f"[INFO] Using GCS credentials from: {GCP_CREDENTIAL_JSON}")
     else:
-        print("[WARN] GOOGLE_APPLICATION_CREDENTIALS not found in .env. SDK might use default ADC.")
+        print("[WARN] GOOGLE_APPLICATION_CREDENTIALS not found or path is invalid. SDK might use default ADC.")
 
-    GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
-    GCS_FOLDER_PREFIX = os.getenv("GCS_FOLDER_PREFIX")
-    
-    return GCS_BUCKET_NAME, GCS_FOLDER_PREFIX
+    GCS_BUCKET_NAME = "med_article"
+    GCS_FOLDER_PREFIX = "27062025/"
 
-def initialize_gcs_bucket(bucket_name):
-    """
-    Initializes the connection to the Google Cloud Storage client and bucket.
-
-    Args:
-        bucket_name (str): The name of the GCS bucket.
-
-    Returns:
-        google.cloud.storage.Bucket: The bucket object if successful, otherwise None.
-    """
+    storage_client = None
+    bucket = None
     try:
         storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        print(f"[INFO] Successfully connected to GCS bucket: {bucket_name}")
-        return bucket
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        print(f"[INFO] Successfully connected to GCS bucket: {GCS_BUCKET_NAME}")
     except Exception as e:
         print(f"[ERROR] Failed to initialize GCS client or bucket: {e}. File uploads will be skipped.")
-        return None
 
-def load_source_data(filepath):
-    """
-    Loads the source data from a CSV file into a pandas DataFrame.
-
-    Args:
-        filepath (str): The path to the CSV file.
-
-    Returns:
-        pandas.DataFrame: The loaded DataFrame, or None if loading fails.
-    """
     try:
-        database = pd.read_csv(filepath)
-        print(f"[INFO] Successfully loaded data from '{filepath}'.")
-        return database
+        database = pd.read_csv("utils/pasc_pubmed.csv")
     except FileNotFoundError:
-        print(f"[ERROR] The CSV file '{filepath}' was not found. Exiting.")
-        return None
+        print(f"[ERROR] The CSV file 'utils/pasc_pubmed.csv' was not found. Exiting.")
+        exit()
     except Exception as e_csv:
-        print(f"[ERROR] Failed to read or parse '{filepath}': {e_csv}. Exiting.")
-        return None
+        print(f"[ERROR] Failed to read or parse 'utils/pasc_pubmed.csv': {e_csv}. Exiting.")
+        exit()
 
-def upload_to_gcs(bucket, source_file_path, gcs_blob_name):
-    """
-    Uploads a single file to the specified Google Cloud Storage bucket.
-
-    Args:
-        bucket (google.cloud.storage.Bucket): The GCS bucket object.
-        source_file_path (str): The local path of the file to upload.
-        gcs_blob_name (str): The destination path (blob name) in GCS.
-    """
-    if not bucket:
-        print(f"[WARN] Skipping GCS upload for {os.path.basename(source_file_path)} as GCS bucket is not available.")
-        return
-
-    blob = bucket.blob(gcs_blob_name)
-    try:
-        print(f"[INFO] Uploading {os.path.basename(source_file_path)} to GCS bucket '{bucket.name}' as '{gcs_blob_name}'...")
-        blob.upload_from_filename(source_file_path)
-        print(f"[SUCCESS] Successfully uploaded to {gcs_blob_name}")
-    except Exception as e_upload:
-        print(f"[ERROR] Failed to upload {os.path.basename(source_file_path)} to GCS: {e_upload}")
-
-def process_articles(database, bucket, gcs_folder_prefix):
-    """
-    Iterates through articles in the DataFrame, downloads them, and uploads them to GCS.
-    
-    Args:
-        database (pandas.DataFrame): DataFrame containing article information.
-        bucket (google.cloud.storage.Bucket): The initialized GCS bucket object.
-        gcs_folder_prefix (str): The folder prefix to use for GCS uploads.
-    """
     with tempfile.TemporaryDirectory() as temp_dir_name:
         print(f"[INFO] Created temporary directory: {temp_dir_name}")
 
         for index, row in database.iterrows():
             try:
-                article_title = row.get('title')
-                pmc_url = row.get('pmc_link')
+                article_title_original = row.get('title')
+                pmc_url = row.get('pmc_link', '') # Default to empty string if missing
                 download_url = row.get('download_link')
-                
-                display_title = str(article_title) if pd.notna(article_title) else f"untitled_row_{index}"
+
+                display_title = str(article_title_original) if pd.notna(article_title_original) else f"untitled_article_row_{index}"
                 print(f"\n--- Processing article: {display_title[:70]}... (Row {index}) ---")
 
-                if not (pmc_url and pd.notna(pmc_url) and download_url and pd.notna(download_url)):
-                    print(f"[WARN] Missing 'pmc_link' or 'download_link'. Skipping.")
+                if not pmc_url or pd.isna(pmc_url) or not download_url or pd.isna(download_url):
+                    print(f"[WARN] Row {index}: Missing 'pmc_link' or 'download_link'. Skipping.")
                     continue
 
-                pdf_filename = sanitize_filename(article_title) + ".pdf"
+                base_filename = sanitize_filename(article_title_original)
+                pdf_filename = base_filename + ".pdf"
                 
-                downloaded_pdf_path = download_pdf(download_url, pmc_url, temp_dir_name, pdf_filename)
+                # STEP 1: DOWNLOAD PDF
+                downloaded_pdf_path = download_pmc_pdf(download_url, pmc_url, temp_dir_name, pdf_filename)
 
                 if downloaded_pdf_path:
-                    gcs_blob_name = f"{gcs_folder_prefix}{pdf_filename}"
-                    upload_to_gcs(bucket, downloaded_pdf_path, gcs_blob_name)
+                    print(f"[SUCCESS] PDF downloaded to: {os.path.basename(downloaded_pdf_path)}")
+                    
+                    if storage_client and bucket:
+                        # STEP 2: EDIT PDF METADATA
+                        # Prepare the metadata values
+                        pmcid = "N/A"
+                        if 'PMC' in pmc_url.upper():
+                            # Extracts the ID like 'PMC12345' from '.../articles/PMC12345/'
+                            pmcid = pmc_url.strip().strip('/').split('/')[-1]
+
+                        gcs_blob_name = f"{GCS_FOLDER_PREFIX}{pdf_filename}"
+                        gcs_public_link = f"https://storage.googleapis.com/{GCS_BUCKET_NAME}/{gcs_blob_name}"
+
+                        metadata_to_add = {
+                            '/Title': str(article_title_original) if pd.notna(article_title_original) else "N/A",
+                            '/PMCID': pmcid,
+                            '/GCS_Public_Link': gcs_public_link
+                        }
+                        
+                        # Define path for the new PDF with metadata
+                        edited_pdf_path = os.path.join(temp_dir_name, f"meta_{pdf_filename}")
+                        
+                        # Run the metadata editing function
+                        final_pdf_to_upload = edit_pdf_metadata(downloaded_pdf_path, edited_pdf_path, metadata_to_add)
+
+                        # STEP 3: UPLOAD MODIFIED PDF TO GCS
+                        if final_pdf_to_upload:
+                            blob = bucket.blob(gcs_blob_name)
+                            try:
+                                print(f"[INFO] Uploading {os.path.basename(final_pdf_to_upload)} to GCS as '{gcs_blob_name}'...")
+                                blob.upload_from_filename(final_pdf_to_upload)
+                                # You can make the blob public if needed, but be aware of security implications
+                                # blob.make_public()
+                                print(f"[SUCCESS] Upload complete. Public link (if bucket is public): {gcs_public_link}")
+                            except Exception as e_upload:
+                                print(f"[ERROR] Failed to upload {os.path.basename(final_pdf_to_upload)} to GCS: {e_upload}")
+                        else:
+                            print(f"[WARN] Could not edit metadata for {pdf_filename}. Aborting upload.")
+                    else:
+                        print(f"[WARN] Skipping metadata/upload for {pdf_filename} as GCS is not available.")
                 else:
                     print(f"[FAIL] Failed to download PDF for article: {display_title}")
 
-            except Exception as e_row:
-                title_for_error = row.get('title', f"unavailable_title_at_row_{index}")
-                print(f"[ERROR] An critical error occurred processing row {index} (Title: {title_for_error}): {e_row}")
+            except Exception as e_row_processing:
+                current_title_for_error = row.get('title', f"unavailable_title_at_row_{index}")
+                print(f"[ERROR] A critical unexpected error occurred while processing row {index} (Title: {current_title_for_error}): {e_row_processing}")
+                print(f"[INFO] Skipping this item and continuing with the next.")
 
-    print(f"\n[INFO] Processing complete. Temporary directory {temp_dir_name} has been removed.")
-
-def main():
-    """
-    Main execution function to run the entire article download and upload pipeline.
-    """
-    gcs_bucket_name, gcs_folder_prefix = load_configuration()
-    bucket = initialize_gcs_bucket(gcs_bucket_name)
-    database = load_source_data("pasc_pubmed.csv")
-
-    if database is None:
-        return # Exit if data loading failed
-
-    # --- Processing Phase ---
-    process_articles(database, bucket, gcs_folder_prefix)
-
-if __name__ == "__main__":
-    main()
+    print(f"\n[INFO] Processing complete. Temporary directory {temp_dir_name} and its contents have been removed.")

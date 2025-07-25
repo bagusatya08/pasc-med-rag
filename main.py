@@ -1,108 +1,343 @@
+import pandas as pd
+import os
+import time
+import datetime
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
-
 from api.query_rewriter import QueryRewriter
 from api.context_summarization import ContextSummarizer
 from api.answer_generator import AnswerGeneratorRAG, AnswerGeneratorFrozen
-
 import gradio as gr
 from dotenv import load_dotenv
-import os
 
+# --- Setup and Initialization ---
+
+# Load environment variables from .env file
 load_dotenv()
+
+# Define the name for the output CSV file
+RESULTS_CSV_FILE = "gradio_pipeline_logs.csv"
+
+# --- Data Logging Functions ---
+
+def initialize_dataframe():
+    """
+    Initializes a pandas DataFrame to store results.
+    If a CSV file with previous results exists, it loads it.
+    Otherwise, it creates an empty DataFrame with the specified columns.
+    """
+    columns = [
+        "timestamp", "pipeline_type", "query", "rewritten_query",
+        "retrieved_context", "summarized_context", "thinking_process", "final_answer",
+        "source_1", "score_1", "source_2", "score_2", "source_3", "score_3",
+        "rewriting_time_s", "retrieval_time_s", "summarization_time_s", "generation_time_s"
+    ]
+    if os.path.exists(RESULTS_CSV_FILE):
+        print(f"Loading existing results from {RESULTS_CSV_FILE}...")
+        df = pd.read_csv(RESULTS_CSV_FILE)
+    else:
+        print("Creating a new DataFrame for results.")
+        df = pd.DataFrame(columns=columns)
+    return df
+
+def log_results(data_dict):
+    """
+    Appends a new row of results to the global DataFrame and saves it to a CSV file.
+    
+    Args:
+        data_dict (dict): A dictionary containing the data for the new row.
+    """
+    global results_df
+    # Ensure the dictionary has all columns, filling missing ones with None
+    new_row = pd.DataFrame([data_dict])
+    results_df = pd.concat([results_df, new_row], ignore_index=True)
+    
+    # Save the updated dataframe to CSV
+    results_df.to_csv(RESULTS_CSV_FILE, index=False)
+    print(f"Results logged. Total entries: {len(results_df)}")
+
+
+# --- Initialize DataFrame ---
+# This global DataFrame will hold all the results.
+results_df = initialize_dataframe()
+
+
+# --- LLM and Vector Store Initialization ---
 
 rewriter = QueryRewriter()
 context_summarizer = ContextSummarizer()
 answer_generator_RAG = AnswerGeneratorRAG()
 embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
-vector_store = FAISS.load_local("med_article_vdb0406", embeddings, allow_dangerous_deserialization=True)
+
+vector_store = FAISS.load_local("med_article_vdb2706", embeddings, allow_dangerous_deserialization=True)
 answer_generator_frozen = AnswerGeneratorFrozen()
 
+
+# --- Pipeline Logic ---
+
 def naive_pipeline(query: str):
-    docs = vector_store.similarity_search(query, k=3)
-    context = "\n\n".join([
-            f"<Chunk {i+1}>\n{doc.page_content}" 
-            for i, doc in enumerate(docs)
-            ])
+    timings = {}
+    start_time = time.perf_counter()
+    docs = vector_store.similarity_search_with_score(query, k=3)
+    end_time = time.perf_counter()
+    timings['retrieval'] = end_time - start_time
 
+    source_links = []
+    scores = []
+    formatted_chunks = []
+    for i, (doc, score) in enumerate(docs):
+        chunk_text = f"<Chunk {i+1}>\n{doc.page_content}"
+        formatted_chunks.append(chunk_text)
+        source = doc.metadata["source"].replace("gs:/", "https://storage.googleapis.com")
+        source_links.append(source)
+        scores.append(score)
+
+    context = "\n\n".join(formatted_chunks)
+    start_time = time.perf_counter()
     final_answer = answer_generator_RAG.generate(query, context)
-
-    return context, final_answer
+    end_time = time.perf_counter()
+    timings['answer_generation'] = end_time - start_time
+    
+    return context, final_answer, source_links, scores, timings
 
 def advanced_pipeline(query: str):
-    try:
-        rewritten_query = rewriter.rewrite(query)
-        docs = vector_store.similarity_search(rewritten_query, k=3)
-        context = "\n\n".join([
-            f"<Chunk {i+1}>\n{doc.page_content}" 
-            for i, doc in enumerate(docs)
-            ])
-        summarized_context = context_summarizer.summarize(context)
-        final_answer = answer_generator_RAG.generate(query, summarized_context)
-        
-        return rewritten_query, context, summarized_context, final_answer
-    except Exception as e:
-        error_msg = f"Error: {str(e)}"
-        return error_msg, error_msg, error_msg, error_msg
+    timings = {}
+    start_time = time.perf_counter()
+    rewritten_query = rewriter.rewrite(query)
+    end_time = time.perf_counter()
+    timings['query_rewriting'] = end_time - start_time
 
-inp = gr.Textbox(label="Input Query", placeholder="Enter your question...")
+    start_time = time.perf_counter()
+    docs = vector_store.similarity_search_with_score(rewritten_query, k=3)
+    end_time = time.perf_counter()
+    timings['retrieval'] = end_time - start_time
+
+    source_links, scores, formatted_chunks = [], [], []
+    for i, (doc, score) in enumerate(docs):
+        chunk_text = f"<Chunk {i+1}>\n{doc.page_content}"
+        formatted_chunks.append(chunk_text)
+        source = doc.metadata["source"].replace("gs:/", "https://storage.googleapis.com")
+        source_links.append(source)
+        scores.append(score)
+
+    context = "\n\n".join(formatted_chunks)
+    start_time = time.perf_counter()
+    summarized_context = context_summarizer.summarize(context)
+    end_time = time.perf_counter()
+    timings['summarization'] = end_time - start_time
+
+    start_time = time.perf_counter()
+    final_answer = answer_generator_RAG.generate(query, summarized_context)
+    end_time = time.perf_counter()
+    timings['generation'] = end_time - start_time
+    
+    return rewritten_query, context, summarized_context, final_answer, source_links, scores, timings
 
 def frozen_pipeline(query: str):
+    timings = {}
+    start_time = time.perf_counter()
     final_answer = answer_generator_frozen.generate(query)
-    return final_answer
+    end_time = time.perf_counter()
+    timings['generation'] = end_time - start_time
+    return final_answer, timings
+
+# --- UI Functions (with Logging) ---
+
+def ui_naive(query):
+    context, answer, source_links, scores, timings = naive_pipeline(query)
+
+    # Prepare data for logging
+    log_data = {
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "pipeline_type": "Naive RAG",
+        "query": query,
+        "retrieved_context": context,
+        "retrieval_time_s": timings.get("retrieval"),
+        "generation_time_s": timings.get("answer_generation"),
+    }
     
-with gr.Blocks(theme=gr.themes.Soft()) as user_input:
-    with gr.Row():
-        with gr.Column():
-            inp.render()
-            btn = gr.Button("Run Pipeline", variant="primary")
-    
-    btn.click(
-        inputs=inp
+    parts = answer.split("</think>")
+    if len(parts) == 2:
+        log_data["thinking_process"] = parts[0].replace("<think>", "").strip()
+        log_data["final_answer"] = parts[1].strip()
+    else:
+        log_data["thinking_process"] = ""
+        log_data["final_answer"] = answer
+
+    for i in range(3):
+        log_data[f"source_{i+1}"] = source_links[i] if i < len(source_links) else None
+        log_data[f"score_{i+1}"] = scores[i] if i < len(scores) else None
+
+    log_results(log_data)
+
+    # Prepare data for Gradio UI
+    source_updates, score_updates = [], []
+    for i in range(3):
+        if i < len(source_links):
+            source_updates.append(gr.Button(value=f"Source {i+1}", link=source_links[i], visible=True))
+            score_updates.append(gr.Textbox(value=f"{scores[i]:.4f}", visible=True))
+        else:
+            source_updates.append(gr.Button(visible=False))
+            score_updates.append(gr.Textbox(visible=False))
+            
+    return (
+        context, log_data["thinking_process"], log_data["final_answer"],
+        *source_updates, *score_updates,
+        f"{timings['retrieval']:.2f} seconds",
+        f"{timings['answer_generation']:.2f} seconds"
     )
 
-with gr.Blocks(theme=gr.themes.Soft()) as advanced:
-    with gr.Row():
-        with gr.Column():
-            rewrite_out = gr.Textbox(label="Rewritten Query", interactive=False)
-            context_out = gr.Textbox(label="Retrieved Context", lines=4, interactive=False)
-            summary_out = gr.Textbox(label="Summarized Context", interactive=False)
-            answer_out = gr.Textbox(label="Final Answer", interactive=False)
+def ui_advanced(query):
+    rewritten_query, context, summarized_context, answer, source_links, scores, timings = advanced_pipeline(query)
+
+    # Prepare data for logging
+    log_data = {
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "pipeline_type": "Advanced RAG",
+        "query": query,
+        "rewritten_query": rewritten_query,
+        "retrieved_context": context,
+        "summarized_context": summarized_context,
+        "rewriting_time_s": timings.get("query_rewriting"),
+        "retrieval_time_s": timings.get("retrieval"),
+        "summarization_time_s": timings.get("summarization"),
+        "generation_time_s": timings.get("generation"),
+    }
+
+    parts = answer.split("</think>")
+    if len(parts) == 2:
+        log_data["thinking_process"] = parts[0].replace("<think>", "").strip()
+        log_data["final_answer"] = parts[1].strip()
+    else:
+        log_data["thinking_process"] = ""
+        log_data["final_answer"] = answer
+        
+    for i in range(3):
+        log_data[f"source_{i+1}"] = source_links[i] if i < len(source_links) else None
+        log_data[f"score_{i+1}"] = scores[i] if i < len(scores) else None
+
+    log_results(log_data)
     
-    inp.change(
-        advanced_pipeline,
+    # Prepare data for Gradio UI
+    source_updates, score_updates = [], []
+    for i in range(3):
+        if i < len(source_links):
+            source_updates.append(gr.Button(value=f"Source {i+1}", link=source_links[i], visible=True))
+            score_updates.append(gr.Textbox(value=f"{scores[i]:.4f}", visible=True))
+        else:
+            source_updates.append(gr.Button(visible=False))
+            score_updates.append(gr.Textbox(visible=False))
+
+    return (
+        rewritten_query, context, summarized_context, log_data["thinking_process"], log_data["final_answer"],
+        *source_updates, *score_updates,
+        f"{timings['query_rewriting']:.2f} seconds",
+        f"{timings['retrieval']:.2f} seconds",
+        f"{timings['summarization']:.2f} seconds",
+        f"{timings['generation']:.2f} seconds"
+    )
+
+def ui_frozen(query):
+    answer, timings = frozen_pipeline(query)
+
+    # Prepare data for logging
+    log_data = {
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "pipeline_type": "Frozen LLM",
+        "query": query,
+        "generation_time_s": timings.get("generation"),
+    }
+    
+    parts = answer.split("</think>")
+    if len(parts) == 2:
+        log_data["thinking_process"] = parts[0].replace("<think>", "").strip()
+        log_data["final_answer"] = parts[1].strip()
+    else:
+        log_data["thinking_process"] = ""
+        log_data["final_answer"] = answer
+        
+    log_results(log_data)
+
+    return log_data["thinking_process"], log_data["final_answer"], f"{timings['generation']:.2f} seconds"
+
+with gr.Blocks(theme=gr.themes.Origin()) as demo:
+    with gr.Tab():
+        inp = gr.Textbox(label="Input Query", placeholder="Enter your medical question here...", scale=4)
+
+    with gr.Tab("Advanced RAG"):
+        with gr.Row():
+            with gr.Column(scale=1):
+                adv_source1 = gr.Button(value="Source 1")
+                adv_score1 = gr.Textbox(label="Score 1", interactive=False)
+                adv_source2 = gr.Button(value="Source 2")
+                adv_score2 = gr.Textbox(label="Score 2", interactive=False)
+                adv_source3 = gr.Button(value="Source 3")
+                adv_score3 = gr.Textbox(label="Score 3", interactive=False)
+            with gr.Column(scale=3):
+                adv_rewrite_out = gr.Textbox(label="Rewritten Query", interactive=False, lines=2)
+                adv_context_out = gr.Textbox(label="Retrieved Context", lines=8, interactive=False)
+                adv_summary_out = gr.Textbox(label="Summarized Context", interactive=False, lines=4)
+        with gr.Accordion("Thinking Process & Timings", open=False):
+            adv_think_out = gr.Textbox(label="Thinking Process", lines=8, interactive=False)
+            with gr.Row():
+                adv_rewriting_time = gr.Textbox(label="Rewriting Time", interactive=False)
+                adv_retrieval_time = gr.Textbox(label="Retrieval Time", interactive=False)
+                adv_summarization_time = gr.Textbox(label="Summarization Time", interactive=False)
+                adv_generation_time = gr.Textbox(label="Generation Time", interactive=False)
+        adv_answer_out = gr.Textbox(label="Final Answer", lines=5, interactive=False)
+        
+    with gr.Tab("Naive RAG"):
+        with gr.Row():
+            with gr.Column(scale=1):
+                naive_source1 = gr.Button(value="Source 1")
+                naive_score1 = gr.Textbox(label="Score 1", interactive=False)
+                naive_source2 = gr.Button(value="Source 2")
+                naive_score2 = gr.Textbox(label="Score 2", interactive=False)
+                naive_source3 = gr.Button(value="Source 3")
+                naive_score3 = gr.Textbox(label="Score 3", interactive=False)
+            with gr.Column(scale=3):
+                naive_context_out = gr.Textbox(label="Retrieved Context", lines=15, interactive=False)
+        with gr.Accordion("Thinking Process & Timings", open=False):
+            naive_think_out = gr.Textbox(label="Thinking Process", lines=8, interactive=False)
+            with gr.Row():
+                naive_retrieval_time = gr.Textbox(label="Retrieval Time", interactive=False)
+                naive_generation_time = gr.Textbox(label="Generation Time", interactive=False)
+        naive_answer_out = gr.Textbox(label="Final Answer", lines=5, interactive=False)
+
+    with gr.Tab("Frozen LLM"):
+        with gr.Accordion("Thinking Process & Timings", open=False):
+            frozen_think_out = gr.Textbox(label="Thinking Process", lines=8, interactive=False)
+            frozen_generation_time = gr.Textbox(label="Generation Time", interactive=False)
+        frozen_answer_out = gr.Textbox(label="Final Answer", lines=5, interactive=False)
+
+    inp.submit(
+        ui_advanced,
         inputs=inp,
-        outputs=[rewrite_out, context_out, summary_out, answer_out]
+        outputs=[
+            adv_rewrite_out, adv_context_out, adv_summary_out, adv_think_out, adv_answer_out,
+            adv_source1, adv_source2, adv_source3,
+            adv_score1, adv_score2, adv_score3,
+            adv_rewriting_time, adv_retrieval_time, adv_summarization_time, adv_generation_time
+        ]
     )
-
-with gr.Blocks(theme=gr.themes.Soft()) as naive:
-    with gr.Row():
-        with gr.Column():
-            context_out = gr.Textbox(label="Retrieved Context", lines=4, interactive=False)
-            answer_out = gr.Textbox(label="Final Answer", interactive=False)
-    
-    inp.change(
-        lambda: gr.Textbox("Processing..."), 
-    ).then(
-        naive_pipeline, 
-        inputs=inp, 
-        outputs=[context_out, answer_out]
-    )
-
-with gr.Blocks(theme=gr.themes.Soft()) as parametric:
-    with gr.Row():
-        with gr.Column():
-            answer_out = gr.Textbox(label="Final Answer", interactive=False)
-    inp.change(
-        frozen_pipeline,
+    inp.submit(
+        ui_naive,
         inputs=inp,
-        outputs=answer_out
+        outputs=[
+            naive_context_out, naive_think_out, naive_answer_out, 
+            naive_source1, naive_source2, naive_source3,
+            naive_score1, naive_score2, naive_score3,
+            naive_retrieval_time, naive_generation_time
+        ]
+    )
+    inp.submit(
+        ui_frozen,
+        inputs=inp,
+        outputs=[
+            frozen_think_out, frozen_answer_out, frozen_generation_time
+        ]
     )
 
-demo = gr.TabbedInterface(
-    [user_input, advanced, naive, parametric],
-    ["Ask Your Question","Advanced RAG", "Naive RAG", "Frozen LLMs"]
-)
 
 if __name__ == "__main__":
     demo.launch(server_port=7860)
