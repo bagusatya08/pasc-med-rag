@@ -10,15 +10,9 @@ from api.answer_generator import AnswerGeneratorRAG, AnswerGeneratorFrozen
 import gradio as gr
 from dotenv import load_dotenv
 
-# --- Setup and Initialization ---
-
-# Load environment variables from .env file
 load_dotenv()
 
-# Define the name for the output CSV file
 RESULTS_CSV_FILE = "gradio_pipeline_logs.csv"
-
-# --- Data Logging Functions ---
 
 def initialize_dataframe():
     """
@@ -48,21 +42,14 @@ def log_results(data_dict):
         data_dict (dict): A dictionary containing the data for the new row.
     """
     global results_df
-    # Ensure the dictionary has all columns, filling missing ones with None
+
     new_row = pd.DataFrame([data_dict])
     results_df = pd.concat([results_df, new_row], ignore_index=True)
     
-    # Save the updated dataframe to CSV
     results_df.to_csv(RESULTS_CSV_FILE, index=False)
     print(f"Results logged. Total entries: {len(results_df)}")
 
-
-# --- Initialize DataFrame ---
-# This global DataFrame will hold all the results.
 results_df = initialize_dataframe()
-
-
-# --- LLM and Vector Store Initialization ---
 
 rewriter = QueryRewriter()
 context_summarizer = ContextSummarizer()
@@ -72,8 +59,6 @@ embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 vector_store = FAISS.load_local("med_article_vdb2706", embeddings, allow_dangerous_deserialization=True)
 answer_generator_frozen = AnswerGeneratorFrozen()
 
-
-# --- Pipeline Logic ---
 
 def naive_pipeline(query: str):
     timings = {}
@@ -127,7 +112,7 @@ def advanced_pipeline(query: str):
     timings['summarization'] = end_time - start_time
 
     start_time = time.perf_counter()
-    final_answer = answer_generator_RAG.generate(query, summarized_context)
+    final_answer = answer_generator_RAG.generate(rewritten_query, summarized_context)
     end_time = time.perf_counter()
     timings['generation'] = end_time - start_time
     
@@ -141,12 +126,10 @@ def frozen_pipeline(query: str):
     timings['generation'] = end_time - start_time
     return final_answer, timings
 
-# --- UI Functions (with Logging) ---
 
 def ui_naive(query):
     context, answer, source_links, scores, timings = naive_pipeline(query)
 
-    # Prepare data for logging
     log_data = {
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "pipeline_type": "Naive RAG",
@@ -170,7 +153,6 @@ def ui_naive(query):
 
     log_results(log_data)
 
-    # Prepare data for Gradio UI
     source_updates, score_updates = [], []
     for i in range(3):
         if i < len(source_links):
@@ -190,7 +172,6 @@ def ui_naive(query):
 def ui_advanced(query):
     rewritten_query, context, summarized_context, answer, source_links, scores, timings = advanced_pipeline(query)
 
-    # Prepare data for logging
     log_data = {
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "pipeline_type": "Advanced RAG",
@@ -218,7 +199,6 @@ def ui_advanced(query):
 
     log_results(log_data)
     
-    # Prepare data for Gradio UI
     source_updates, score_updates = [], []
     for i in range(3):
         if i < len(source_links):
@@ -240,7 +220,6 @@ def ui_advanced(query):
 def ui_frozen(query):
     answer, timings = frozen_pipeline(query)
 
-    # Prepare data for logging
     log_data = {
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "pipeline_type": "Frozen LLM",
@@ -337,7 +316,6 @@ with gr.Blocks(theme=gr.themes.Origin()) as demo:
             frozen_think_out, frozen_answer_out, frozen_generation_time
         ]
     )
-
 
 if __name__ == "__main__":
     demo.launch(server_port=7860)
