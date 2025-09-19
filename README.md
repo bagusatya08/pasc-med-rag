@@ -1,0 +1,1 @@
+![Poster for Retrieval-Augmented Generation Question Answering System for Post-COVID Conditions Patient Education] https://github.com/bagusatya08/pasc-med-rag/poster.png
